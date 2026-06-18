@@ -87,7 +87,7 @@ AgentQuestionAnswers/
 | `uvicorn` | ASGI server |
 | `python-multipart` | File upload support for FastAPI |
 | `langgraph` | Agent orchestration as a state graph |
-| `langchain-openai` | OpenAI LLM and embeddings via LangChain |
+| `langchain-openai` | OpenAI LLM (`gpt-4o-mini`) and embeddings (`text-embedding-3-large`) via LangChain |
 | `langchain` | Core LangChain utilities |
 | `langchain-text-splitters` | Document chunking |
 | `pypdf` | PDF text extraction |
@@ -117,9 +117,11 @@ Create a `.env` file in the project root:
 ```env
 OPENAI_API_KEY=your-openai-api-key-here
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 ```
 
 `OPENAI_MODEL` is optional and defaults to `gpt-4o-mini` if omitted.
+`OPENAI_EMBEDDING_MODEL` is optional and defaults to `text-embedding-3-large` if omitted.
 
 > The `.env` file is listed in `.gitignore` and will not be committed.
 

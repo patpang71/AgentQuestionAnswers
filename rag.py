@@ -19,7 +19,10 @@ def ingest_text(text: str) -> int:
         chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
     )
     chunks = splitter.split_text(text)
-    embeddings = OpenAIEmbeddings(api_key=os.getenv("OPENAI_API_KEY"))
+    embeddings = OpenAIEmbeddings(
+        model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
+        api_key=os.getenv("OPENAI_API_KEY"),
+    )
     _store = InMemoryVectorStore(embedding=embeddings)
     _store.add_texts(chunks)
     return len(chunks)

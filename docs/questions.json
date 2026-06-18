@@ -3,5 +3,6 @@
     "Is personal information transmitted, processed, stored, or disclosed to or retained by third parties? If yes, describe.",
     "Which cloud providers do you rely on?",
     "Please specify the primary data center location/region of the underlying cloud infrastructure used to host the service(s) as well as the backup location(s).",
-    "Which of the following, if any, are performed as part of your monitoring process for the service: Application Performance Monitoring (APM), End User Monitoring (EUM), Digital Experience Monitoring (DEM)"
+    "Which of the following, if any, are performed as part of your monitoring process for the service: Application Performance Monitoring (APM), End User Monitoring (EUM), Digital Experience Monitoring (DEM)",
+    "What is the weather today?"
 ]
