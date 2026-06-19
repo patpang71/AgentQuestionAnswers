@@ -2,10 +2,10 @@ import io
 import json
 
 import pypdf
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 
 from agent import build_agent
-from rag import get_retriever, ingest_text, is_loaded
+from rag import get_ingestion_status, get_retriever, ingest_background, ingest_text, is_loaded
 
 app = FastAPI(title="Question Answering Service")
 
@@ -28,14 +28,20 @@ def extract_text(filename: str, content: bytes) -> str:
         )
 
 
-@app.post("/ingest")
+@app.post("/ingest", status_code=202)
 async def ingest(
+    background_tasks: BackgroundTasks,
     knowledge_file: UploadFile = File(..., description="PDF or JSON file to ingest into the RAG database"),
 ):
     content = await knowledge_file.read()
     text = extract_text(knowledge_file.filename, content)
-    chunk_count = ingest_text(text)
-    return {"message": "Knowledge base loaded successfully.", "chunks": chunk_count}
+    background_tasks.add_task(ingest_background, text)
+    return {"message": "Ingestion started. Poll GET /status to check progress."}
+
+
+@app.get("/status")
+async def status():
+    return get_ingestion_status()
 
 
 @app.post("/answer")
@@ -47,11 +53,18 @@ async def answer(
         knowledge_content = await knowledge_file.read()
         text = extract_text(knowledge_file.filename, knowledge_content)
         ingest_text(text)
-    elif not is_loaded():
-        raise HTTPException(
-            status_code=400,
-            detail="No knowledge base loaded. Provide a knowledge_file or call POST /ingest first.",
-        )
+    else:
+        rag_status = get_ingestion_status()
+        if rag_status["status"] == "processing":
+            raise HTTPException(
+                status_code=409,
+                detail="Knowledge base is still being ingested. Try again shortly or poll GET /status.",
+            )
+        elif not is_loaded():
+            raise HTTPException(
+                status_code=400,
+                detail="No knowledge base loaded. Provide a knowledge_file or call POST /ingest first.",
+            )
 
     questions_content = await questions_file.read()
     try:

@@ -11,6 +11,8 @@ def reset_store():
     rag.clear()
 
 
+# --- ingest_text ---
+
 @patch("rag.InMemoryVectorStore")
 @patch("rag.OpenAIEmbeddings")
 def test_ingest_returns_chunk_count(mock_embeddings, mock_store_class):
@@ -49,6 +51,50 @@ def test_ingest_accumulates_into_existing_store(mock_embeddings, mock_store_clas
     assert mock_store.add_texts.call_count == 2
 
 
+# --- ingest_background ---
+
+@patch("rag.InMemoryVectorStore")
+@patch("rag.OpenAIEmbeddings")
+def test_ingest_background_sets_status_ready(mock_embeddings, mock_store_class):
+    mock_store_class.return_value = MagicMock()
+    rag.ingest_background("Some content.")
+    assert rag.get_ingestion_status()["status"] == "ready"
+
+
+@patch("rag.InMemoryVectorStore")
+@patch("rag.OpenAIEmbeddings")
+def test_ingest_background_updates_chunks_ingested(mock_embeddings, mock_store_class):
+    mock_store_class.return_value = MagicMock()
+    rag.ingest_background("Some content.")
+    assert rag.get_ingestion_status()["chunks_ingested"] >= 1
+
+
+@patch("rag.InMemoryVectorStore")
+@patch("rag.OpenAIEmbeddings")
+def test_ingest_background_accumulates_chunk_count(mock_embeddings, mock_store_class):
+    mock_store_class.return_value = MagicMock()
+    rag.ingest_background("First document.")
+    first_count = rag.get_ingestion_status()["chunks_ingested"]
+    rag.ingest_background("Second document.")
+    assert rag.get_ingestion_status()["chunks_ingested"] >= first_count
+
+
+@patch("rag.ingest_text", side_effect=Exception("Embedding failed"))
+def test_ingest_background_sets_status_error_on_failure(mock_ingest):
+    rag.ingest_background("Some content.")
+    result = rag.get_ingestion_status()
+    assert result["status"] == "error"
+    assert "Embedding failed" in result["detail"]
+
+
+# --- get_ingestion_status ---
+
+def test_status_idle_initially():
+    assert rag.get_ingestion_status() == {"status": "idle", "chunks_ingested": 0, "detail": ""}
+
+
+# --- get_retriever ---
+
 def test_get_retriever_raises_when_not_loaded():
     with pytest.raises(RuntimeError, match="No knowledge base loaded"):
         rag.get_retriever()
@@ -74,6 +120,8 @@ def test_get_retriever_custom_k(mock_embeddings, mock_store_class):
     mock_store.as_retriever.assert_called_once_with(search_kwargs={"k": 8})
 
 
+# --- is_loaded / clear ---
+
 def test_is_loaded_false_initially():
     assert not rag.is_loaded()
 
@@ -93,6 +141,13 @@ def test_clear_resets_store(mock_embeddings, mock_store_class):
     rag.ingest_text("Some content.")
     rag.clear()
     assert not rag.is_loaded()
+
+
+def test_clear_resets_status_and_chunks():
+    rag._status = "ready"
+    rag._chunks_ingested = 42
+    rag.clear()
+    assert rag.get_ingestion_status() == {"status": "idle", "chunks_ingested": 0, "detail": ""}
 
 
 def test_clear_when_already_empty():

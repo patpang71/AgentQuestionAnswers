@@ -21,10 +21,10 @@ A FastAPI service that answers questions from a knowledge base using Retrieval-A
 ## How It Works
 
 ```
-Knowledge File (PDF or JSON)
+POST /ingest (returns 202 immediately)
         │
-        ▼
-  Text Extraction
+        ▼ background thread
+  Text Extraction (PDF or JSON)
         │
         ▼
   Chunking (RecursiveCharacterTextSplitter)
@@ -32,24 +32,30 @@ Knowledge File (PDF or JSON)
         ▼
   OpenAI Embeddings (text-embedding-3-large) → InMemoryVectorStore (RAG database)
         │
-        ▼
-  Question File (JSON list of strings)
+  GET /status  →  idle | processing | ready | error + chunks_ingested
+        │
+        ▼ (status = ready)
+POST /answer
         │
         ▼
   LangGraph Agent
-    ├── For each question → similarity search → retrieve top-k relevant chunks
+    ├── All questions sent to ThreadPoolExecutor (parallel)
+    ├── Each question → similarity search → retrieve top-k relevant chunks
     └── OpenAI LLM (gpt-4o-mini) → answer strictly from retrieved context
         │
         ▼
-  [{"question": "...", "answer": "..."}, ...]
+  [{"question": "...", "answer": "..."}, ...]  (order preserved)
 ```
 
 ### Key design decisions
 
+- **Async ingestion**: `POST /ingest` returns `202 Accepted` immediately and processes the file in a background thread. Poll `GET /status` to know when the knowledge base is ready.
+- **Ingestion status tracking**: The RAG module tracks four states — `idle`, `processing`, `ready`, and `error` — along with a running `chunks_ingested` count. `POST /answer` returns `409 Conflict` if called while ingestion is still running.
+- **Accumulating knowledge base**: Calling `/ingest` multiple times adds to the existing store rather than replacing it. Call `clear()` or restart the service to start fresh.
 - **RAG over full-context**: Instead of passing the entire document to the LLM, the agent retrieves only the most relevant chunks per question. This keeps prompts focused and scales to larger documents.
 - **Strict grounding**: The LLM is instructed to answer only from the retrieved context. If the answer cannot be found, it returns `"I cannot find the answer from given source"`.
-- **In-memory store**: The vector store lives in process memory. It resets when the server restarts. For persistence across restarts, swap `InMemoryVectorStore` for a persistent backend (e.g. ChromaDB, Pinecone).
 - **Parallel LLM calls**: All questions are answered concurrently using a `ThreadPoolExecutor`. Total response time is ~1× LLM latency regardless of how many questions are submitted, rather than N× latency for sequential processing. Answer order in the response always matches the order of the input questions.
+- **In-memory store**: The vector store lives in process memory. It resets when the server restarts. For persistence across restarts, swap `InMemoryVectorStore` for a persistent backend (e.g. ChromaDB, Pinecone).
 - **LangGraph orchestration**: The agent is a compiled `StateGraph`. Each node is a discrete step, making it straightforward to add retrieval re-ranking, multi-hop reasoning, or other nodes in the future.
 
 ---
@@ -144,7 +150,7 @@ Interactive API docs (Swagger UI) are available at `http://localhost:8000/docs`.
 
 ### `POST /ingest`
 
-Load a knowledge file into the RAG database. Call this once before querying, or use the `knowledge_file` parameter on `/answer` to ingest and query in a single request.
+Load a knowledge file into the RAG database. Returns `202 Accepted` immediately — chunking and embedding run in a background thread. Poll `GET /status` to check progress. Calling this multiple times accumulates content into the same store.
 
 **Request** — multipart form data
 
@@ -152,16 +158,38 @@ Load a knowledge file into the RAG database. Call this once before querying, or 
 |---|---|---|---|
 | `knowledge_file` | File | Yes | PDF or JSON file to ingest |
 
+**Response** `202 Accepted`
+
+```json
+{
+  "message": "Ingestion started. Poll GET /status to check progress."
+}
+```
+
+---
+
+### `GET /status`
+
+Check the current state of the RAG knowledge base.
+
 **Response**
 
 ```json
 {
-  "message": "Knowledge base loaded successfully.",
-  "chunks": 42
+  "status": "ready",
+  "chunks_ingested": 42,
+  "detail": ""
 }
 ```
 
-`chunks` is the number of text segments stored in the vector database.
+| `status` value | Meaning |
+|---|---|
+| `idle` | No knowledge base loaded yet |
+| `processing` | Ingestion is running in the background |
+| `ready` | Knowledge base is loaded and ready to query |
+| `error` | Ingestion failed — `detail` contains the error message |
+
+`chunks_ingested` is a running total across all `/ingest` calls since the server started.
 
 ---
 
@@ -200,6 +228,7 @@ If `knowledge_file` is omitted, the service uses the knowledge base already load
 | `400` | `questions_file` is not a JSON array of strings |
 | `400` | No knowledge base loaded and no `knowledge_file` provided |
 | `400` | `knowledge_file` is not a `.pdf` or `.json` file |
+| `409` | Knowledge base is still being ingested — retry after `GET /status` returns `ready` |
 
 ---
 
@@ -208,11 +237,15 @@ If `knowledge_file` is omitted, the service uses the knowledge base already load
 ### Two-step: ingest then query
 
 ```bash
-# Step 1 — load the knowledge base
+# Step 1 — kick off ingestion (returns 202 immediately)
 curl -X POST http://localhost:8000/ingest \
   -F "knowledge_file=@docs/sample.json"
 
-# Step 2 — ask questions
+# Step 2 — poll until ready
+curl http://localhost:8000/status
+# → {"status": "ready", "chunks_ingested": 19, "detail": ""}
+
+# Step 3 — ask questions
 curl -X POST http://localhost:8000/answer \
   -F "questions_file=@docs/questions.json"
 ```
@@ -278,13 +311,19 @@ python3 -m pytest tests/ -v
 | `test_ingest_returns_chunk_count` | `ingest_text` returns the number of chunks created |
 | `test_ingest_calls_add_texts` | Text chunks are added to the vector store |
 | `test_ingest_sets_store` | `is_loaded()` is `True` after ingestion |
-| `test_ingest_overwrites_previous_store` | Re-ingesting replaces the existing store |
+| `test_ingest_accumulates_into_existing_store` | Re-ingesting adds to the store rather than replacing it |
+| `test_ingest_background_sets_status_ready` | Background ingestion sets status to `ready` on success |
+| `test_ingest_background_updates_chunks_ingested` | `chunks_ingested` is updated after background ingestion |
+| `test_ingest_background_accumulates_chunk_count` | `chunks_ingested` accumulates across multiple ingestions |
+| `test_ingest_background_sets_status_error_on_failure` | Background ingestion sets status to `error` on failure |
+| `test_status_idle_initially` | Status starts as `idle` with zero chunks |
 | `test_get_retriever_raises_when_not_loaded` | `get_retriever()` raises before any ingestion |
 | `test_get_retriever_uses_default_k` | Default retrieval top-k is 4 |
 | `test_get_retriever_custom_k` | Custom `k` is passed through to the retriever |
 | `test_is_loaded_false_initially` | Store starts empty |
 | `test_is_loaded_true_after_ingest` | Store is marked loaded after ingestion |
 | `test_clear_resets_store` | `clear()` unloads the store |
+| `test_clear_resets_status_and_chunks` | `clear()` resets status to `idle` and chunk count to 0 |
 | `test_clear_when_already_empty` | `clear()` is safe to call on an empty store |
 
 **`tests/test_agent.py`** — LangGraph agent behaviour
@@ -309,11 +348,17 @@ python3 -m pytest tests/ -v
 | `test_extract_text_unsupported_format` | `.txt` raises HTTP 400 |
 | `test_extract_text_from_pdf_returns_string` | PDF bytes yield a string |
 | `test_extract_text_pdf` | End-to-end PDF extraction via `extract_text` |
-| `test_ingest_json_success` | `/ingest` with JSON returns chunk count |
-| `test_ingest_pdf_success` | `/ingest` with PDF succeeds |
+| `test_ingest_returns_202` | `/ingest` returns 202 immediately |
+| `test_ingest_triggers_background_task` | `/ingest` dispatches work to a background task |
+| `test_ingest_pdf_returns_202` | `/ingest` with PDF returns 202 |
 | `test_ingest_unsupported_format` | `/ingest` with `.txt` returns 400 |
+| `test_status_idle_initially` | `GET /status` returns `idle` with zero chunks before any ingestion |
+| `test_status_returns_processing` | `GET /status` returns `processing` during ingestion |
+| `test_status_returns_ready_with_chunk_count` | `GET /status` returns `ready` and chunk count when loaded |
+| `test_status_returns_error_with_detail` | `GET /status` returns `error` and detail message on failure |
 | `test_answer_returns_list` | `/answer` returns a list of Q&A objects |
 | `test_answer_without_ingest_returns_400` | `/answer` with no knowledge loaded returns 400 |
+| `test_answer_while_processing_returns_409` | `/answer` during ingestion returns 409 |
 | `test_answer_with_knowledge_file_ingests_then_answers` | `knowledge_file` triggers ingestion before answering |
 | `test_answer_with_knowledge_file_does_not_require_prior_ingest` | `knowledge_file` works without a prior `/ingest` call |
 | `test_answer_invalid_questions_not_a_list` | Non-array questions file returns 400 |

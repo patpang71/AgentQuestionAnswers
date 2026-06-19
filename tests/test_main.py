@@ -82,25 +82,32 @@ def test_extract_text_pdf():
 
 # --- POST /ingest ---
 
-@patch("main.ingest_text", return_value=7)
-def test_ingest_json_success(mock_ingest):
+@patch("main.ingest_background")
+def test_ingest_returns_202(mock_ingest_bg):
     response = client.post(
         "/ingest",
         files={"knowledge_file": ("knowledge.json", SAMPLE_KNOWLEDGE.encode(), "application/json")},
     )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["chunks"] == 7
-    assert "loaded successfully" in data["message"]
+    assert response.status_code == 202
+    assert "started" in response.json()["message"].lower()
 
 
-@patch("main.ingest_text", return_value=3)
-def test_ingest_pdf_success(mock_ingest):
+@patch("main.ingest_background")
+def test_ingest_triggers_background_task(mock_ingest_bg):
+    client.post(
+        "/ingest",
+        files={"knowledge_file": ("knowledge.json", SAMPLE_KNOWLEDGE.encode(), "application/json")},
+    )
+    mock_ingest_bg.assert_called_once()
+
+
+@patch("main.ingest_background")
+def test_ingest_pdf_returns_202(mock_ingest_bg):
     response = client.post(
         "/ingest",
         files={"knowledge_file": ("doc.pdf", minimal_pdf(), "application/pdf")},
     )
-    assert response.status_code == 200
+    assert response.status_code == 202
 
 
 def test_ingest_unsupported_format():
@@ -111,12 +118,43 @@ def test_ingest_unsupported_format():
     assert response.status_code == 400
 
 
+# --- GET /status ---
+
+def test_status_idle_initially():
+    response = client.get("/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "idle"
+    assert data["chunks_ingested"] == 0
+    assert data["detail"] == ""
+
+
+@patch("main.get_ingestion_status", return_value={"status": "processing", "chunks_ingested": 0, "detail": ""})
+def test_status_returns_processing(mock_status):
+    assert client.get("/status").json()["status"] == "processing"
+
+
+@patch("main.get_ingestion_status", return_value={"status": "ready", "chunks_ingested": 12, "detail": ""})
+def test_status_returns_ready_with_chunk_count(mock_status):
+    data = client.get("/status").json()
+    assert data["status"] == "ready"
+    assert data["chunks_ingested"] == 12
+
+
+@patch("main.get_ingestion_status", return_value={"status": "error", "chunks_ingested": 0, "detail": "Embedding failed"})
+def test_status_returns_error_with_detail(mock_status):
+    data = client.get("/status").json()
+    assert data["status"] == "error"
+    assert data["detail"] == "Embedding failed"
+
+
 # --- POST /answer ---
 
 @patch("main.build_agent")
 @patch("main.get_retriever")
 @patch("main.is_loaded", return_value=True)
-def test_answer_returns_list(mock_loaded, mock_retriever, mock_build_agent):
+@patch("main.get_ingestion_status", return_value={"status": "ready", "chunks_ingested": 5, "detail": ""})
+def test_answer_returns_list(mock_status, mock_loaded, mock_retriever, mock_build_agent):
     mock_agent = MagicMock()
     mock_agent.invoke.return_value = {"answers": MOCK_ANSWERS}
     mock_build_agent.return_value = mock_agent
@@ -133,13 +171,24 @@ def test_answer_returns_list(mock_loaded, mock_retriever, mock_build_agent):
 
 
 @patch("main.is_loaded", return_value=False)
-def test_answer_without_ingest_returns_400(mock_loaded):
+@patch("main.get_ingestion_status", return_value={"status": "idle", "chunks_ingested": 0, "detail": ""})
+def test_answer_without_ingest_returns_400(mock_status, mock_loaded):
     response = client.post(
         "/answer",
         files={"questions_file": ("q.json", json.dumps(SAMPLE_QUESTIONS).encode(), "application/json")},
     )
     assert response.status_code == 400
     assert "ingest" in response.json()["detail"].lower()
+
+
+@patch("main.get_ingestion_status", return_value={"status": "processing", "chunks_ingested": 0, "detail": ""})
+def test_answer_while_processing_returns_409(mock_status):
+    response = client.post(
+        "/answer",
+        files={"questions_file": ("q.json", json.dumps(SAMPLE_QUESTIONS).encode(), "application/json")},
+    )
+    assert response.status_code == 409
+    assert "still being ingested" in response.json()["detail"].lower()
 
 
 @patch("main.build_agent")
@@ -181,7 +230,8 @@ def test_answer_with_knowledge_file_does_not_require_prior_ingest(mock_ingest, m
 
 
 @patch("main.is_loaded", return_value=True)
-def test_answer_invalid_questions_not_a_list(mock_loaded):
+@patch("main.get_ingestion_status", return_value={"status": "ready", "chunks_ingested": 5, "detail": ""})
+def test_answer_invalid_questions_not_a_list(mock_status, mock_loaded):
     response = client.post(
         "/answer",
         files={"questions_file": ("q.json", b'{"not": "a list"}', "application/json")},
@@ -191,7 +241,8 @@ def test_answer_invalid_questions_not_a_list(mock_loaded):
 
 
 @patch("main.is_loaded", return_value=True)
-def test_answer_questions_not_strings(mock_loaded):
+@patch("main.get_ingestion_status", return_value={"status": "ready", "chunks_ingested": 5, "detail": ""})
+def test_answer_questions_not_strings(mock_status, mock_loaded):
     response = client.post(
         "/answer",
         files={"questions_file": ("q.json", b'[1, 2, 3]', "application/json")},
@@ -202,7 +253,8 @@ def test_answer_questions_not_strings(mock_loaded):
 @patch("main.build_agent")
 @patch("main.get_retriever")
 @patch("main.is_loaded", return_value=True)
-def test_answer_agent_invoked_with_correct_state(mock_loaded, mock_retriever, mock_build_agent):
+@patch("main.get_ingestion_status", return_value={"status": "ready", "chunks_ingested": 5, "detail": ""})
+def test_answer_agent_invoked_with_correct_state(mock_status, mock_loaded, mock_retriever, mock_build_agent):
     mock_agent = MagicMock()
     mock_agent.invoke.return_value = {"answers": MOCK_ANSWERS}
     mock_build_agent.return_value = mock_agent
