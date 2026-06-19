@@ -23,7 +23,8 @@ def ingest_text(text: str) -> int:
         model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
         api_key=os.getenv("OPENAI_API_KEY"),
     )
-    _store = InMemoryVectorStore(embedding=embeddings)
+    if _store is None:
+        _store = InMemoryVectorStore(embedding=embeddings)
     _store.add_texts(chunks)
     return len(chunks)
 

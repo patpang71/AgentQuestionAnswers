@@ -39,14 +39,14 @@ def test_ingest_sets_store(mock_embeddings, mock_store_class):
 
 @patch("rag.InMemoryVectorStore")
 @patch("rag.OpenAIEmbeddings")
-def test_ingest_overwrites_previous_store(mock_embeddings, mock_store_class):
-    store1, store2 = MagicMock(), MagicMock()
-    mock_store_class.side_effect = [store1, store2]
+def test_ingest_accumulates_into_existing_store(mock_embeddings, mock_store_class):
+    mock_store = MagicMock()
+    mock_store_class.return_value = mock_store
     rag.ingest_text("First document.")
     rag.ingest_text("Second document.")
-    rag.get_retriever()
-    store2.as_retriever.assert_called_once()
-    store1.as_retriever.assert_not_called()
+    # Store created only once; add_texts called twice
+    mock_store_class.assert_called_once()
+    assert mock_store.add_texts.call_count == 2
 
 
 def test_get_retriever_raises_when_not_loaded():

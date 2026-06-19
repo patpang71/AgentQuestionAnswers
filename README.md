@@ -30,7 +30,7 @@ Knowledge File (PDF or JSON)
   Chunking (RecursiveCharacterTextSplitter)
         │
         ▼
-  OpenAI Embeddings → InMemoryVectorStore (RAG database)
+  OpenAI Embeddings (text-embedding-3-large) → InMemoryVectorStore (RAG database)
         │
         ▼
   Question File (JSON list of strings)
@@ -38,7 +38,7 @@ Knowledge File (PDF or JSON)
         ▼
   LangGraph Agent
     ├── For each question → similarity search → retrieve top-k relevant chunks
-    └── OpenAI LLM → answer strictly from retrieved context
+    └── OpenAI LLM (gpt-4o-mini) → answer strictly from retrieved context
         │
         ▼
   [{"question": "...", "answer": "..."}, ...]

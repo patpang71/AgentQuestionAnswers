@@ -170,7 +170,6 @@ def test_answer_with_knowledge_file_does_not_require_prior_ingest(mock_ingest, m
     mock_agent.invoke.return_value = {"answers": MOCK_ANSWERS}
     mock_build_agent.return_value = mock_agent
 
-    # RAG store is empty (reset_rag fixture cleared it), but knowledge_file is provided
     response = client.post(
         "/answer",
         files={
