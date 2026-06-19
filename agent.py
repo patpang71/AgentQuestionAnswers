@@ -1,4 +1,5 @@
 from typing import TypedDict, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 
 from dotenv import load_dotenv
@@ -28,26 +29,31 @@ def build_agent(retriever):
         api_key=os.getenv("OPENAI_API_KEY"),
     )
 
-    def retrieve_and_answer(state: AgentState) -> AgentState:
-        answers = []
-        for question in state["questions"]:
-            docs = retriever.invoke(question)
-            context = "\n\n".join(doc.page_content for doc in docs)
-
-            user_prompt = f"""Context:
+    def answer_one(question: str) -> dict:
+        docs = retriever.invoke(question)
+        context = "\n\n".join(doc.page_content for doc in docs)
+        user_prompt = f"""Context:
 {context}
 
 Question: {question}
 
 Answer based solely on the context above. Be concise."""
+        response = llm.invoke(
+            [
+                SystemMessage(content=SYSTEM_PROMPT),
+                HumanMessage(content=user_prompt),
+            ]
+        )
+        return {"question": question, "answer": response.content.strip()}
 
-            response = llm.invoke(
-                [
-                    SystemMessage(content=SYSTEM_PROMPT),
-                    HumanMessage(content=user_prompt),
-                ]
-            )
-            answers.append({"question": question, "answer": response.content.strip()})
+    def retrieve_and_answer(state: AgentState) -> AgentState:
+        questions = state["questions"]
+        answers = [None] * len(questions)
+
+        with ThreadPoolExecutor() as executor:
+            futures = {executor.submit(answer_one, q): i for i, q in enumerate(questions)}
+            for future in as_completed(futures):
+                answers[futures[future]] = future.result()
 
         return {"answers": answers}
 

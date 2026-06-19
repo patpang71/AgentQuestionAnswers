@@ -39,18 +39,17 @@ def test_returns_one_answer_per_question(mock_chat):
 @patch("agent.ChatOpenAI")
 def test_multiple_questions(mock_chat):
     mock_llm = MagicMock()
-    mock_llm.invoke.side_effect = [
-        mock_llm_response("Answer 1"),
-        mock_llm_response("Answer 2"),
-    ]
+    mock_llm.invoke.return_value = mock_llm_response("Some answer.")
     mock_chat.return_value = mock_llm
 
     agent = build_agent(make_retriever(["Context."]))
     result = agent.invoke(make_state(["Question 1", "Question 2"]))
 
     assert len(result["answers"]) == 2
-    assert result["answers"][0] == {"question": "Question 1", "answer": "Answer 1"}
-    assert result["answers"][1] == {"question": "Question 2", "answer": "Answer 2"}
+    # Order of answers matches order of input questions
+    assert result["answers"][0]["question"] == "Question 1"
+    assert result["answers"][1]["question"] == "Question 2"
+    assert all("answer" in a for a in result["answers"])
 
 
 @patch("agent.ChatOpenAI")

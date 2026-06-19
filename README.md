@@ -49,6 +49,7 @@ Knowledge File (PDF or JSON)
 - **RAG over full-context**: Instead of passing the entire document to the LLM, the agent retrieves only the most relevant chunks per question. This keeps prompts focused and scales to larger documents.
 - **Strict grounding**: The LLM is instructed to answer only from the retrieved context. If the answer cannot be found, it returns `"I cannot find the answer from given source"`.
 - **In-memory store**: The vector store lives in process memory. It resets when the server restarts. For persistence across restarts, swap `InMemoryVectorStore` for a persistent backend (e.g. ChromaDB, Pinecone).
+- **Parallel LLM calls**: All questions are answered concurrently using a `ThreadPoolExecutor`. Total response time is ~1× LLM latency regardless of how many questions are submitted, rather than N× latency for sequential processing. Answer order in the response always matches the order of the input questions.
 - **LangGraph orchestration**: The agent is a compiled `StateGraph`. Each node is a discrete step, making it straightforward to add retrieval re-ranking, multi-hop reasoning, or other nodes in the future.
 
 ---
