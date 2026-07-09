@@ -137,6 +137,25 @@ def test_build_agent_returns_compiled_graph():
 
 
 @patch("agent.ChatOpenAI")
+def test_llm_configured_with_default_timeout_and_retries(mock_chat):
+    build_agent(make_retriever([]))
+
+    _, kwargs = mock_chat.call_args
+    assert kwargs["request_timeout"] == 30.0
+    assert kwargs["max_retries"] == 2
+
+
+@patch.dict("os.environ", {"OPENAI_TIMEOUT_SECONDS": "5", "OPENAI_MAX_RETRIES": "0"})
+@patch("agent.ChatOpenAI")
+def test_llm_timeout_and_retries_configurable_via_env(mock_chat):
+    build_agent(make_retriever([]))
+
+    _, kwargs = mock_chat.call_args
+    assert kwargs["request_timeout"] == 5.0
+    assert kwargs["max_retries"] == 0
+
+
+@patch("agent.ChatOpenAI")
 def test_one_failing_question_does_not_break_others(mock_chat):
     def side_effect(messages):
         human_content = messages[1].content

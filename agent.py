@@ -30,6 +30,8 @@ def build_agent(retriever):
         model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         temperature=0,
         api_key=os.getenv("OPENAI_API_KEY"),
+        request_timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
+        max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
     )
 
     def answer_one(question: str) -> dict:

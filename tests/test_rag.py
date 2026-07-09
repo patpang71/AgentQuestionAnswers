@@ -18,6 +18,29 @@ def reset_store():
 
 @patch("rag.InMemoryVectorStore")
 @patch("rag.OpenAIEmbeddings")
+def test_ingest_configures_embeddings_with_default_timeout_and_retries(mock_embeddings, mock_store_class):
+    mock_store_class.return_value = MagicMock()
+    rag.ingest_text("Some content.")
+
+    _, kwargs = mock_embeddings.call_args
+    assert kwargs["request_timeout"] == 30.0
+    assert kwargs["max_retries"] == 2
+
+
+@patch.dict("os.environ", {"OPENAI_TIMEOUT_SECONDS": "5", "OPENAI_MAX_RETRIES": "0"})
+@patch("rag.InMemoryVectorStore")
+@patch("rag.OpenAIEmbeddings")
+def test_ingest_timeout_and_retries_configurable_via_env(mock_embeddings, mock_store_class):
+    mock_store_class.return_value = MagicMock()
+    rag.ingest_text("Some content.")
+
+    _, kwargs = mock_embeddings.call_args
+    assert kwargs["request_timeout"] == 5.0
+    assert kwargs["max_retries"] == 0
+
+
+@patch("rag.InMemoryVectorStore")
+@patch("rag.OpenAIEmbeddings")
 def test_ingest_returns_chunk_count(mock_embeddings, mock_store_class):
     mock_store_class.return_value = MagicMock()
     count = rag.ingest_text("Some text about security policies and data centers.")

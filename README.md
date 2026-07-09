@@ -125,10 +125,14 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=your-openai-api-key-here
 OPENAI_MODEL=gpt-4o-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-large
+OPENAI_TIMEOUT_SECONDS=30
+OPENAI_MAX_RETRIES=2
 ```
 
 `OPENAI_MODEL` is optional and defaults to `gpt-4o-mini` if omitted.
 `OPENAI_EMBEDDING_MODEL` is optional and defaults to `text-embedding-3-large` if omitted.
+`OPENAI_TIMEOUT_SECONDS` is optional and defaults to `30` — per-request timeout for both the LLM and embeddings calls, so a hung OpenAI request can't block a worker thread indefinitely.
+`OPENAI_MAX_RETRIES` is optional and defaults to `2` — number of automatic retries on transient OpenAI errors (rate limits, network blips) before giving up.
 
 > The `.env` file is listed in `.gitignore` and will not be committed.
 

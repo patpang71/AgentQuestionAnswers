@@ -28,6 +28,8 @@ def ingest_text(text: str) -> int:
     embeddings = OpenAIEmbeddings(
         model=os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
         api_key=os.getenv("OPENAI_API_KEY"),
+        request_timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "30")),
+        max_retries=int(os.getenv("OPENAI_MAX_RETRIES", "2")),
     )
     # Serialize store creation/mutation: InMemoryVectorStore isn't thread-safe,
     # and concurrent ingests (two /ingest calls, or /ingest racing /answer's
