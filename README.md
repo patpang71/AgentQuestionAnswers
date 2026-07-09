@@ -127,12 +127,14 @@ OPENAI_MODEL=gpt-4o-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 OPENAI_TIMEOUT_SECONDS=30
 OPENAI_MAX_RETRIES=2
+MAX_UPLOAD_SIZE_BYTES=20971520
 ```
 
 `OPENAI_MODEL` is optional and defaults to `gpt-4o-mini` if omitted.
 `OPENAI_EMBEDDING_MODEL` is optional and defaults to `text-embedding-3-large` if omitted.
 `OPENAI_TIMEOUT_SECONDS` is optional and defaults to `30` — per-request timeout for both the LLM and embeddings calls, so a hung OpenAI request can't block a worker thread indefinitely.
 `OPENAI_MAX_RETRIES` is optional and defaults to `2` — number of automatic retries on transient OpenAI errors (rate limits, network blips) before giving up.
+`MAX_UPLOAD_SIZE_BYTES` is optional and defaults to `20971520` (20 MB) — uploads are read in bounded chunks and rejected with `413` before being fully buffered in memory if they exceed this size.
 
 > The `.env` file is listed in `.gitignore` and will not be committed.
 
@@ -232,7 +234,10 @@ If `knowledge_file` is omitted, the service uses the knowledge base already load
 | `400` | `questions_file` is not a JSON array of strings |
 | `400` | No knowledge base loaded and no `knowledge_file` provided |
 | `400` | `knowledge_file` is not a `.pdf` or `.json` file |
+| `400` | `knowledge_file` is a `.json` file with malformed JSON |
+| `400` | `knowledge_file` is a `.pdf` file that `pypdf` cannot parse (corrupt, encrypted, etc.) |
 | `409` | Knowledge base is still being ingested — retry after `GET /status` returns `ready` |
+| `413` | Uploaded file exceeds `MAX_UPLOAD_SIZE_BYTES` |
 
 ---
 

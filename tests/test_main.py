@@ -1,11 +1,14 @@
+import asyncio
+import io
 import json
 import zlib
 import pytest
+from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
 import rag
-from main import app, extract_text, extract_text_from_pdf
+from main import app, extract_text, extract_text_from_pdf, read_upload
 
 client = TestClient(app)
 
@@ -80,6 +83,43 @@ def test_extract_text_pdf():
     assert isinstance(result, str)
 
 
+def test_extract_text_invalid_json_raises_400():
+    with pytest.raises(HTTPException) as exc_info:
+        extract_text("knowledge.json", b"{not valid json")
+    assert exc_info.value.status_code == 400
+    assert "invalid json" in exc_info.value.detail.lower()
+
+
+def test_extract_text_from_pdf_corrupt_raises_400():
+    with pytest.raises(HTTPException) as exc_info:
+        extract_text_from_pdf(b"not actually a pdf")
+    assert exc_info.value.status_code == 400
+    assert "pdf" in exc_info.value.detail.lower()
+
+
+def test_extract_text_corrupt_pdf_raises_400():
+    with pytest.raises(HTTPException) as exc_info:
+        extract_text("doc.pdf", b"not actually a pdf")
+    assert exc_info.value.status_code == 400
+
+
+# --- read_upload ---
+
+def test_read_upload_returns_full_content_within_limit():
+    content = b"hello world"
+    upload = UploadFile(filename="small.json", file=io.BytesIO(content))
+    result = asyncio.run(read_upload(upload, max_bytes=1000))
+    assert result == content
+
+
+def test_read_upload_rejects_oversized_file():
+    content = b"x" * 1000
+    upload = UploadFile(filename="big.json", file=io.BytesIO(content))
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(read_upload(upload, max_bytes=100))
+    assert exc_info.value.status_code == 413
+
+
 # --- POST /ingest ---
 
 @patch("main.ingest_background")
@@ -114,6 +154,23 @@ def test_ingest_unsupported_format():
     response = client.post(
         "/ingest",
         files={"knowledge_file": ("doc.txt", b"some text", "text/plain")},
+    )
+    assert response.status_code == 400
+
+
+def test_ingest_invalid_json_returns_400():
+    response = client.post(
+        "/ingest",
+        files={"knowledge_file": ("knowledge.json", b"{not valid json", "application/json")},
+    )
+    assert response.status_code == 400
+    assert "invalid json" in response.json()["detail"].lower()
+
+
+def test_ingest_corrupt_pdf_returns_400():
+    response = client.post(
+        "/ingest",
+        files={"knowledge_file": ("doc.pdf", b"not actually a pdf", "application/pdf")},
     )
     assert response.status_code == 400
 
