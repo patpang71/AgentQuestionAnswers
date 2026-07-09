@@ -56,6 +56,7 @@ POST /answer
 - **Strict grounding**: The LLM is instructed to answer only from the retrieved context. If the answer cannot be found, it returns `"I cannot find the answer from given source"`.
 - **Parallel LLM calls**: All questions are answered concurrently using a `ThreadPoolExecutor`. Total response time is ~1× LLM latency regardless of how many questions are submitted, rather than N× latency for sequential processing. Answer order in the response always matches the order of the input questions.
 - **In-memory store**: The vector store lives in process memory. It resets when the server restarts. For persistence across restarts, swap `InMemoryVectorStore` for a persistent backend (e.g. ChromaDB, Pinecone).
+- **Single-process only — do not run with multiple workers**: Because the store is a per-process Python global (`rag.py`), it is **not** shared across processes. Running `uvicorn` with `--workers > 1`, under a process-per-request manager (e.g. Gunicorn with multiple workers), or behind a load balancer fanning out to multiple replicas will silently split traffic across workers with independent, inconsistent knowledge bases — `/ingest` on one worker will be invisible to `/answer` on another, with no error raised. Always run this service as a single process. See [Running the Service](#running-the-service).
 - **LangGraph orchestration**: The agent is a compiled `StateGraph`. Each node is a discrete step, making it straightforward to add retrieval re-ranking, multi-hop reasoning, or other nodes in the future.
 
 ---
@@ -149,6 +150,8 @@ python3 -m uvicorn main:app --reload
 The service starts at `http://localhost:8000`.
 
 Interactive API docs (Swagger UI) are available at `http://localhost:8000/docs`.
+
+> **Run as a single process.** The RAG knowledge base is an in-memory Python global (see [Key design decisions](#key-design-decisions)), not shared across processes. **Do not** start this with `uvicorn --workers N` (N > 1), a multi-worker Gunicorn config, or multiple replicas behind a load balancer — each process would maintain its own independent, inconsistent knowledge base with no error raised. If you need to scale beyond one process, replace `InMemoryVectorStore` with a shared/persistent backend first.
 
 ---
 
