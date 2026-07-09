@@ -24,6 +24,8 @@ If the answer cannot be found in the context, respond with exactly:
 I cannot find the answer from given source
 Do not infer, assume, or add any information not present in the context."""
 
+MAX_CONCURRENT_QUESTIONS = int(os.getenv("MAX_CONCURRENT_QUESTIONS", "8"))
+
 
 def build_agent(retriever):
     llm = ChatOpenAI(
@@ -63,7 +65,7 @@ Answer based solely on the context above. Be concise."""
         questions = state["questions"]
         answers = [None] * len(questions)
 
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_QUESTIONS) as executor:
             futures = {executor.submit(answer_one, q): i for i, q in enumerate(questions)}
             for future in as_completed(futures):
                 answers[futures[future]] = future.result()

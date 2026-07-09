@@ -54,7 +54,7 @@ POST /answer
 - **Accumulating knowledge base**: Calling `/ingest` multiple times adds to the existing store rather than replacing it. Call `clear()` or restart the service to start fresh.
 - **RAG over full-context**: Instead of passing the entire document to the LLM, the agent retrieves only the most relevant chunks per question. This keeps prompts focused and scales to larger documents.
 - **Strict grounding**: The LLM is instructed to answer only from the retrieved context. If the answer cannot be found, it returns `"I cannot find the answer from given source"`.
-- **Parallel LLM calls**: All questions are answered concurrently using a `ThreadPoolExecutor`. Total response time is ~1× LLM latency regardless of how many questions are submitted, rather than N× latency for sequential processing. Answer order in the response always matches the order of the input questions.
+- **Parallel LLM calls**: Questions are answered concurrently using a `ThreadPoolExecutor`, bounded by `MAX_CONCURRENT_QUESTIONS` (default 8) so a large questions file can't fire an unbounded burst of concurrent OpenAI calls and trip rate limits. Response time is roughly `ceil(num_questions / MAX_CONCURRENT_QUESTIONS) × LLM latency`. Answer order in the response always matches the order of the input questions.
 - **In-memory store**: The vector store lives in process memory. It resets when the server restarts. For persistence across restarts, swap `InMemoryVectorStore` for a persistent backend (e.g. ChromaDB, Pinecone).
 - **Single-process only — do not run with multiple workers**: Because the store is a per-process Python global (`rag.py`), it is **not** shared across processes. Running `uvicorn` with `--workers > 1`, under a process-per-request manager (e.g. Gunicorn with multiple workers), or behind a load balancer fanning out to multiple replicas will silently split traffic across workers with independent, inconsistent knowledge bases — `/ingest` on one worker will be invisible to `/answer` on another, with no error raised. Always run this service as a single process. See [Running the Service](#running-the-service).
 - **LangGraph orchestration**: The agent is a compiled `StateGraph`. Each node is a discrete step, making it straightforward to add retrieval re-ranking, multi-hop reasoning, or other nodes in the future.
@@ -129,6 +129,7 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-large
 OPENAI_TIMEOUT_SECONDS=30
 OPENAI_MAX_RETRIES=2
 MAX_UPLOAD_SIZE_BYTES=20971520
+MAX_CONCURRENT_QUESTIONS=8
 ```
 
 `OPENAI_MODEL` is optional and defaults to `gpt-4o-mini` if omitted.
@@ -136,6 +137,7 @@ MAX_UPLOAD_SIZE_BYTES=20971520
 `OPENAI_TIMEOUT_SECONDS` is optional and defaults to `30` — per-request timeout for both the LLM and embeddings calls, so a hung OpenAI request can't block a worker thread indefinitely.
 `OPENAI_MAX_RETRIES` is optional and defaults to `2` — number of automatic retries on transient OpenAI errors (rate limits, network blips) before giving up.
 `MAX_UPLOAD_SIZE_BYTES` is optional and defaults to `20971520` (20 MB) — uploads are read in bounded chunks and rejected with `413` before being fully buffered in memory if they exceed this size.
+`MAX_CONCURRENT_QUESTIONS` is optional and defaults to `8` — caps how many questions are answered in parallel per `/answer` request, so a large questions file doesn't fire an unbounded burst of concurrent OpenAI calls and trip rate limits.
 
 > The `.env` file is listed in `.gitignore` and will not be committed.
 

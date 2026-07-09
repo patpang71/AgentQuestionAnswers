@@ -1,3 +1,6 @@
+import threading
+import time
+
 import pytest
 from unittest.mock import MagicMock, patch
 from langchain_core.documents import Document
@@ -188,3 +191,33 @@ def test_successful_answers_marked_not_error(mock_chat):
     result = agent.invoke(make_state(["Question?"]))
 
     assert result["answers"][0]["error"] is False
+
+
+@patch("agent.ChatOpenAI")
+def test_concurrent_questions_bounded_by_max_workers(mock_chat, monkeypatch):
+    monkeypatch.setattr("agent.MAX_CONCURRENT_QUESTIONS", 3)
+
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+
+    def side_effect(messages):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return mock_llm_response("Answer.")
+
+    mock_llm = MagicMock()
+    mock_llm.invoke.side_effect = side_effect
+    mock_chat.return_value = mock_llm
+
+    agent = build_agent(make_retriever(["Context."]))
+    questions = [f"Question {i}" for i in range(10)]
+    result = agent.invoke(make_state(questions))
+
+    assert len(result["answers"]) == 10
+    assert max_active <= 3
