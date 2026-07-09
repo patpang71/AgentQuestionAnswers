@@ -1,5 +1,6 @@
 from typing import TypedDict, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -8,6 +9,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class AgentState(TypedDict):
@@ -30,21 +33,29 @@ def build_agent(retriever):
     )
 
     def answer_one(question: str) -> dict:
-        docs = retriever.invoke(question)
-        context = "\n\n".join(doc.page_content for doc in docs)
-        user_prompt = f"""Context:
+        try:
+            docs = retriever.invoke(question)
+            context = "\n\n".join(doc.page_content for doc in docs)
+            user_prompt = f"""Context:
 {context}
 
 Question: {question}
 
 Answer based solely on the context above. Be concise."""
-        response = llm.invoke(
-            [
-                SystemMessage(content=SYSTEM_PROMPT),
-                HumanMessage(content=user_prompt),
-            ]
-        )
-        return {"question": question, "answer": response.content.strip()}
+            response = llm.invoke(
+                [
+                    SystemMessage(content=SYSTEM_PROMPT),
+                    HumanMessage(content=user_prompt),
+                ]
+            )
+            return {"question": question, "answer": response.content.strip(), "error": False}
+        except Exception:
+            logger.exception("Failed to answer question: %r", question)
+            return {
+                "question": question,
+                "answer": "An error occurred while answering this question. Please try again.",
+                "error": True,
+            }
 
     def retrieve_and_answer(state: AgentState) -> AgentState:
         questions = state["questions"]

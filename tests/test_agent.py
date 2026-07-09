@@ -134,3 +134,38 @@ def test_retrieved_context_included_in_prompt(mock_chat):
 def test_build_agent_returns_compiled_graph():
     agent = build_agent(make_retriever([]))
     assert agent is not None
+
+
+@patch("agent.ChatOpenAI")
+def test_one_failing_question_does_not_break_others(mock_chat):
+    def side_effect(messages):
+        human_content = messages[1].content
+        if "bad question" in human_content:
+            raise RuntimeError("boom")
+        return mock_llm_response("Good answer.")
+
+    mock_llm = MagicMock()
+    mock_llm.invoke.side_effect = side_effect
+    mock_chat.return_value = mock_llm
+
+    agent = build_agent(make_retriever(["Context."]))
+    result = agent.invoke(make_state(["good question", "bad question"]))
+
+    answers = {a["question"]: a for a in result["answers"]}
+    assert len(answers) == 2
+    assert answers["good question"]["answer"] == "Good answer."
+    assert answers["good question"]["error"] is False
+    assert answers["bad question"]["error"] is True
+    assert "error occurred" in answers["bad question"]["answer"]
+
+
+@patch("agent.ChatOpenAI")
+def test_successful_answers_marked_not_error(mock_chat):
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = mock_llm_response("Answer.")
+    mock_chat.return_value = mock_llm
+
+    agent = build_agent(make_retriever(["Context."]))
+    result = agent.invoke(make_state(["Question?"]))
+
+    assert result["answers"][0]["error"] is False
