@@ -1,3 +1,6 @@
+import threading
+import time
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -153,3 +156,32 @@ def test_clear_resets_status_and_chunks():
 def test_clear_when_already_empty():
     rag.clear()
     assert not rag.is_loaded()
+
+
+# --- concurrency ---
+
+@patch("rag.InMemoryVectorStore")
+@patch("rag.OpenAIEmbeddings")
+def test_concurrent_ingest_background_no_lost_updates(mock_embeddings, mock_store_class):
+    # Simulate slow add_texts calls so overlapping ingests are likely to
+    # interleave without the lock, exposing the chunks_ingested race.
+    mock_store = MagicMock()
+
+    def slow_add_texts(chunks):
+        time.sleep(0.01)
+
+    mock_store.add_texts.side_effect = slow_add_texts
+    mock_store_class.return_value = mock_store
+
+    texts = [f"Document number {i} with some content to chunk." for i in range(20)]
+    threads = [threading.Thread(target=rag.ingest_background, args=(t,)) for t in texts]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    status = rag.get_ingestion_status()
+    assert status["status"] == "ready"
+    assert mock_store.add_texts.call_count == 20
+    expected_chunks = sum(len(call.args[0]) for call in mock_store.add_texts.call_args_list)
+    assert status["chunks_ingested"] == expected_chunks
